@@ -7,6 +7,16 @@ st.write(
     "Upload a document below and ask a question about it – GPT will answer! "
 )
 
+st.title("📝Tasks")
+my_tasks = ["polish_email", "polish_paragraph"]
+task = st.selectbox("Select a predefined task:", my_tasks, index=None)
+
+predefined_prompts = {
+    "uploaded_file": "Here's a document: {0}",
+    "polish_email": "Please help polish and rephrase the following email",
+    "polish_paragraph": "Please help polish, rephrase, correct grammas for the following paragraphs"
+}
+
 # Ask user for their OpenAI API key via `st.text_input`.
 # Alternatively, you can store the API key in `./.streamlit/secrets.toml` and access it
 # via `st.secrets`, see https://docs.streamlit.io/develop/concepts/connections/secrets-management
@@ -30,20 +40,36 @@ else:
         disabled=not uploaded_file,
     )
 
-    if uploaded_file and question:
-
-        # Process the uploaded file and question.
-        document = uploaded_file.read().decode()
+    if question:
         messages = [
             {
                 "role": "user",
-                "content": f"Here's a document: {document} \n\n---\n\n {question}",
+                "content": f"{question}",
             }
         ]
 
+        if uploaded_file:
+
+            # Process the uploaded file and question.
+            document = uploaded_file.read().decode()
+            messages = [
+                {
+                    "role": "user",
+                    "content": predefined_prompts["uploaded_file"].format(document) + f"\n\n---\n\n {question}",
+                }
+            ]
+        
+        if task:
+            messages = [
+                {
+                    "role": "user",
+                    "content": predefined_prompts[task] + f"\n\n---\n\n {question}",
+                }
+            ]
+
         # Generate an answer using the OpenAI API.
         stream = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o-mini",
             messages=messages,
             stream=True,
         )
