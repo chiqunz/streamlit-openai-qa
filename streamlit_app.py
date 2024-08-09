@@ -35,9 +35,9 @@ if not openai_api_key:
     st.info("Please add your OpenAI API key in the env.", icon="🗝️")
 
 st.title("📝Tasks")
-st.selectbox("Select a predefined task:", my_tasks, index=None, key='selection')
+task = st.selectbox("Select a predefined task:", my_tasks, index=None)
 
-if st.session_state.selection == "document_qa":
+if task == "document_qa":
     # Show title and description.
     st.title("📄 Document question answering")
     st.write(
@@ -61,10 +61,10 @@ for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
 
 if query := st.chat_input(placeholder="Type here"):
-    prompt = generate_messages(st.session_state.selection, query, uploaded_file)
+    prompt = generate_messages(task, query, uploaded_file)
     st.session_state.messages.append({"role": "user", "content": prompt})
     st.chat_message("user").write(prompt)
-    st.session_state.selection = None
+    task = None
 
     if not openai_api_key:
         st.info("Please add your OpenAI API key to continue.")
