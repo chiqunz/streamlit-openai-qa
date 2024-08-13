@@ -1,5 +1,6 @@
 import streamlit as st
 from openai import OpenAI
+from dify_client import ChatClient
 from langchain.agents import initialize_agent, AgentType
 from langchain.callbacks import StreamlitCallbackHandler
 from langchain.chat_models import ChatOpenAI
@@ -12,6 +13,7 @@ predefined_prompts = {
 }
 
 my_tasks = ["polish_email", "polish_paragraph", "document_qa"]
+backends = ["native", "dify"]
 uploaded_file = None
 
 def generate_messages(task, query, uploaded_file):
@@ -27,38 +29,67 @@ def generate_messages(task, query, uploaded_file):
     return messages
 
 
-# Ask user for their OpenAI API key via `st.text_input`.
-# Alternatively, you can store the API key in `./.streamlit/secrets.toml` and access it
-# via `st.secrets`, see https://docs.streamlit.io/develop/concepts/connections/secrets-management
-openai_api_key = st.secrets["api"]['open_ai']
+def dify_generator(chat_response):
+    for line in chat_response.iter_lines(decode_unicode=True):
+        line = line.split('data:', 1)[-1]
+        if line.strip():
+            line = json.loads(line.strip())
+            answer = line.get('answer')
+            if answer:
+                yield answer
+
+
+openai_api_key = "" #st.secrets["api"]['open_ai']
+dify_key = "" #st.secrets["api"]['dify']
 if not openai_api_key:
     st.info("Please add your OpenAI API key in the env.", icon="🗝️")
-
-st.title("📝Tasks")
-task = st.selectbox("Select a predefined task:", my_tasks, index=None)
-
-if task == "document_qa":
-    # Show title and description.
-    st.title("📄 Document question answering")
-    st.write(
-        "Upload a document below and ask a question about it – GPT will answer! "
-    )
-
-    # Let the user upload a file via `st.file_uploader`.
-    uploaded_file = st.file_uploader(
-        "Upload a document (.txt or .md)", type=("txt", "md")
-    )
-
-# Create an OpenAI client.
-client = OpenAI(api_key=openai_api_key)
+if not dify_key:
+    st.info("Please add your Dify App key in the env.", icon="🗝️")
 
 if "messages" not in st.session_state:
     st.session_state["messages"] = [
         {"role": "assistant", "content": "Hi, I'm baby Jasper. How can I help you?"}
     ]
-
 for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
+
+st.title("🕸️Backends")
+backend = st.selectbox("Select a backend:", backends, index=0)
+
+chat_client = None
+if backend == "native":
+    st.title("📝Tasks")
+    task = st.selectbox("Select a predefined task:", my_tasks, index=None)
+
+    if task == "document_qa":
+        # Show title and description.
+        st.title("📄 Document question answering")
+        st.write(
+            "Upload a document below and ask a question about it – GPT will answer! "
+        )
+
+        # Let the user upload a file via `st.file_uploader`.
+        uploaded_file = st.file_uploader(
+            "Upload a document (.txt or .md)", type=("txt", "md")
+        )
+    
+    llm = ChatOpenAI(model_name="gpt-4o-mini", openai_api_key=openai_api_key, streaming=True)
+    search = DuckDuckGoSearchRun(name="Search")
+    chat_client = initialize_agent(
+        [search], llm, agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, handle_parsing_errors=True
+    )
+elif backend == "dify":
+    task = None
+    uploaded_file = None
+    user_id = 'chiqun'
+    chat_client = ChatClient(dify_key)
+    conversations = chat_client.get_conversations(user=user_id)
+    conversations = json.loads(conversations.text)['data']
+    conversation_id = None
+    if len(conversations) > 0:
+        conversation_id = conversations[-1]['id']
+
+
 
 if query := st.chat_input(placeholder="Type here"):
     prompt = generate_messages(task, query, uploaded_file)
@@ -66,17 +97,18 @@ if query := st.chat_input(placeholder="Type here"):
     st.chat_message("user").write(prompt)
     task = None
 
-    if not openai_api_key:
-        st.info("Please add your OpenAI API key to continue.")
-        st.stop()
+    if backend == "native":
+        with st.chat_message("assistant"):
+            st_cb = StreamlitCallbackHandler(st.container(), expand_new_thoughts=False)
+            response = chat_client.run(st.session_state.messages, callbacks=[st_cb])
+            st.write(response)
+            st.session_state.messages.append({"role": "assistant", "content": response})
+    elif backend == "dify":
+        chat_response = chat_client.create_chat_message(inputs={}, query=prompt, user=user_id, response_mode="streaming", conversation_id=conversation_id)
+        chat_response.raise_for_status()
+        with st.chat_message("assistant"):
+            msg = st.write_stream(dify_generator(chat_response))
+            st.session_state.messages.append({"role": "assistant", "content": response})
 
-    llm = ChatOpenAI(model_name="gpt-4o-mini", openai_api_key=openai_api_key, streaming=True)
-    search = DuckDuckGoSearchRun(name="Search")
-    search_agent = initialize_agent(
-        [search], llm, agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, handle_parsing_errors=True
-    )
-    with st.chat_message("assistant"):
-        st_cb = StreamlitCallbackHandler(st.container(), expand_new_thoughts=False)
-        response = search_agent.run(st.session_state.messages, callbacks=[st_cb])
-        st.session_state.messages.append({"role": "assistant", "content": response})
-        st.write(response)
+
+        
