@@ -1,10 +1,11 @@
 import streamlit as st
-from openai import OpenAI
+import json
 from dify_client import ChatClient
 from langchain.agents import initialize_agent, AgentType
 from langchain.callbacks import StreamlitCallbackHandler
 from langchain.chat_models import ChatOpenAI
 from langchain.tools import DuckDuckGoSearchRun
+import uuid
 
 predefined_prompts = {
     "document_qa": "Here's a document: {0}",
@@ -39,19 +40,12 @@ def dify_generator(chat_response):
                 yield answer
 
 
-openai_api_key = "" #st.secrets["api"]['open_ai']
-dify_key = "" #st.secrets["api"]['dify']
+openai_api_key = st.secrets["api"]['open_ai']
+dify_key = st.secrets["api"]['dify']
 if not openai_api_key:
     st.info("Please add your OpenAI API key in the env.", icon="🗝️")
 if not dify_key:
     st.info("Please add your Dify App key in the env.", icon="🗝️")
-
-if "messages" not in st.session_state:
-    st.session_state["messages"] = [
-        {"role": "assistant", "content": "Hi, I'm baby Jasper. How can I help you?"}
-    ]
-for msg in st.session_state.messages:
-    st.chat_message(msg["role"]).write(msg["content"])
 
 st.title("🕸️Backends")
 backend = st.selectbox("Select a backend:", backends, index=0)
@@ -74,22 +68,25 @@ if backend == "native":
         )
     
     llm = ChatOpenAI(model_name="gpt-4o-mini", openai_api_key=openai_api_key, streaming=True)
-    search = DuckDuckGoSearchRun(name="Search")
+    tools = [DuckDuckGoSearchRun(name="Search")]
+    agent_type = AgentType.ZERO_SHOT_REACT_DESCRIPTION
     chat_client = initialize_agent(
-        [search], llm, agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, handle_parsing_errors=True
+        tools, llm, agent=agent_type, handle_parsing_errors=True
     )
 elif backend == "dify":
     task = None
     uploaded_file = None
-    user_id = 'chiqun'
+    if "user_id" not in st.session_state:
+        st.session_state["user_id"] = 'chiqun_' + uuid.uuid4().hex
     chat_client = ChatClient(dify_key)
-    conversations = chat_client.get_conversations(user=user_id)
-    conversations = json.loads(conversations.text)['data']
     conversation_id = None
-    if len(conversations) > 0:
-        conversation_id = conversations[-1]['id']
 
-
+if "messages" not in st.session_state:
+    st.session_state["messages"] = [
+        {"role": "assistant", "content": "Hi, I'm baby Jasper. How can I help you?"}
+    ]
+for msg in st.session_state.messages:
+    st.chat_message(msg["role"]).write(msg["content"])
 
 if query := st.chat_input(placeholder="Type here"):
     prompt = generate_messages(task, query, uploaded_file)
@@ -104,11 +101,18 @@ if query := st.chat_input(placeholder="Type here"):
             st.write(response)
             st.session_state.messages.append({"role": "assistant", "content": response})
     elif backend == "dify":
-        chat_response = chat_client.create_chat_message(inputs={}, query=prompt, user=user_id, response_mode="streaming", conversation_id=conversation_id)
+        if conversation_id is None:
+            user_messages = [m for m in st.session_state.messages if m["role"] == "user"]
+            if len(user_messages) > 1:
+                conversations = chat_client.get_conversations(user=st.session_state.user_id)
+                conversations = json.loads(conversations.text)['data']
+                if len(conversations) > 0:
+                    conversation_id = conversations[-1]['id']
+        chat_response = chat_client.create_chat_message(inputs={}, query=prompt, user=st.session_state.user_id, response_mode="streaming", conversation_id=conversation_id)
         chat_response.raise_for_status()
         with st.chat_message("assistant"):
             msg = st.write_stream(dify_generator(chat_response))
-            st.session_state.messages.append({"role": "assistant", "content": response})
+            st.session_state.messages.append({"role": "assistant", "content": msg})
 
 
         
