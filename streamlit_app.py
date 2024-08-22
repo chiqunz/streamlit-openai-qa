@@ -69,7 +69,7 @@ if backend == "native":
     
     llm = ChatOpenAI(model_name="gpt-4o-mini", openai_api_key=openai_api_key, streaming=True)
     tools = [DuckDuckGoSearchRun(name="Search")]
-    agent_type = AgentType.ZERO_SHOT_REACT_DESCRIPTION
+    agent_type = AgentType.CHAT_ZERO_SHOT_REACT_DESCRIPTION
     chat_client = initialize_agent(
         tools, llm, agent=agent_type, handle_parsing_errors=True
     )
