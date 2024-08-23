@@ -1,10 +1,7 @@
 import streamlit as st
 import json
 from dify_client import ChatClient
-from langchain.agents import initialize_agent, AgentType
-from langchain.callbacks import StreamlitCallbackHandler
-from langchain.chat_models import ChatOpenAI
-from langchain.tools import DuckDuckGoSearchRun
+from openai import OpenAI
 import uuid
 
 predefined_prompts = {
@@ -67,12 +64,7 @@ if backend == "native":
             "Upload a document (.txt or .md)", type=("txt", "md")
         )
     
-    llm = ChatOpenAI(model_name="gpt-4o-mini", openai_api_key=openai_api_key, streaming=True)
-    tools = [DuckDuckGoSearchRun(name="Search")]
-    agent_type = AgentType.CHAT_ZERO_SHOT_REACT_DESCRIPTION
-    chat_client = initialize_agent(
-        tools, llm, agent=agent_type, handle_parsing_errors=True
-    )
+    chat_client = OpenAI(api_key=openai_api_key)
 elif backend == "dify":
     task = None
     uploaded_file = None
@@ -91,15 +83,22 @@ for msg in st.session_state.messages:
 if query := st.chat_input(placeholder="Type here"):
     prompt = generate_messages(task, query, uploaded_file)
     st.session_state.messages.append({"role": "user", "content": prompt})
-    st.chat_message("user").write(prompt)
+    with st.chat_message("user"):
+        st.markdown(prompt)
     task = None
 
     if backend == "native":
         with st.chat_message("assistant"):
-            st_cb = StreamlitCallbackHandler(st.container(), expand_new_thoughts=False)
-            response = chat_client.run(st.session_state.messages, callbacks=[st_cb])
-            st.write(response)
-            st.session_state.messages.append({"role": "assistant", "content": response})
+            stream = chat_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": m["role"], "content": m["content"]}
+                    for m in st.session_state.messages
+                ],
+                stream=True,
+            )
+            response = st.write_stream(stream)
+        st.session_state.messages.append({"role": "assistant", "content": response})
     elif backend == "dify":
         if conversation_id is None:
             user_messages = [m for m in st.session_state.messages if m["role"] == "user"]
